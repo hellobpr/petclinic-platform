@@ -1,0 +1,9 @@
+# PETPLAT-1: dev variable values.
+#
+# Copy to terraform.tfvars (which is gitignored per security rule 8) and adjust:
+#   cp terraform.tfvars.example terraform.tfvars
+
+aws_region         = "eu-central-1"
+environment        = "dev"
+project            = "petclinic"
+availability_zones = ["eu-central-1a", "eu-central-1b"]

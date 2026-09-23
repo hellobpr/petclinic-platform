@@ -1,0 +1,9 @@
+# PETPLAT-3: backend bucket for dev, supplied at init time.
+#
+# Generated for you by scripts/bootstrap-state.sh. To write it by hand, replace
+# {account-id} with your AWS account ID:
+#   aws sts get-caller-identity --query Account --output text
+#
+# Then: terraform init -backend-config=backend.hcl
+
+bucket = "petclinic-terraform-state-{account-id}"

@@ -211,12 +211,19 @@ Create the Terraform directory structure in petclinic-platform with separate env
 **Technical Spec:** [General Project Parameters](./technical-spec.md#general-project-parameters), [Terraform Modules](./technical-spec.md#terraform-modules)
 
 **Acceptance Criteria:**
-- [ ] `terraform/environments/dev/` directory exists with main.tf, variables.tf, outputs.tf, backend.tf, terraform.tfvars
-- [ ] `terraform/environments/prod/` directory exists with same files
-- [ ] `terraform/modules/` directory exists with subdirectories: vpc, eks, ecr, rds, dns, secrets, observability
-- [ ] Each module dir has placeholder main.tf, variables.tf, outputs.tf
-- [ ] .gitignore includes .terraform/, *.tfstate, *.tfstate.backup, *.tfvars (sensitive), plan.out, .env, *.pem, *.key, IDE files, OS files
-- [ ] .terraform.lock.hcl is NOT in .gitignore (must be committed for reproducible builds)
+- [x] `terraform/environments/dev/` directory exists with main.tf, variables.tf, outputs.tf, backend.tf, terraform.tfvars
+- [x] `terraform/environments/prod/` directory exists with same files
+- [x] `terraform/modules/` directory exists with subdirectories: vpc, eks, ecr, rds, dns, secrets, observability
+- [x] Each module dir has placeholder main.tf, variables.tf, outputs.tf
+- [x] .gitignore includes .terraform/, *.tfstate, *.tfstate.backup, *.tfvars (sensitive), plan.out, .env, *.pem, *.key, IDE files, OS files
+- [x] .terraform.lock.hcl is NOT in .gitignore (must be committed for reproducible builds)
+
+**Notes:**
+
+- `terraform.tfvars` is shipped as `terraform.tfvars.example` in both environments, not as a committed `terraform.tfvars`. The two ACs above pull in opposite directions: one asks for `terraform.tfvars` in the tree, the other gitignores `*.tfvars` (as does security rule 8). The `.example` + `cp` pattern satisfies both — `.gitignore` already carried a `!*.tfvars.example` negation for exactly this.
+- Each module also has `versions.tf`, which the AC omits but `.claude/rules/terraform.md` lists as a MUST for every module directory. Four files per module, not three.
+- `karpenter/` is not created here. CLAUDE.md lists it under `terraform/modules/`, but this AC enumerates seven modules without it and Karpenter is E-14 (PETPLAT-73). It gets created there.
+- `terraform fmt -recursive` produced no changes and `terraform validate` passes in both environments and all seven modules.
 
 ---
 
@@ -234,13 +241,29 @@ Create a bootstrap script that provisions the S3 bucket (versioning enabled, enc
 **Technical Spec:** [Terraform State Backend](./technical-spec.md#terraform-state-backend)
 
 **Acceptance Criteria:**
-- [ ] `scripts/bootstrap-state.sh` script created
-- [ ] S3 bucket created with versioning enabled
-- [ ] S3 bucket has server-side encryption (AES256 or KMS)
-- [ ] S3 bucket has public access blocked (all 4 settings)
-- [ ] DynamoDB table created with `LockID` as partition key (String)
-- [ ] Script is idempotent (safe to run multiple times)
-- [ ] Script accepts region as parameter (default: eu-central-1)
+- [x] `scripts/bootstrap-state.sh` script created
+- [x] S3 bucket created with versioning enabled
+- [x] S3 bucket has server-side encryption (AES256 or KMS)
+- [x] S3 bucket has public access blocked (all 4 settings)
+- [x] DynamoDB table created with `LockID` as partition key (String)
+- [x] Script is idempotent (safe to run multiple times)
+- [x] Script accepts region as parameter (default: eu-central-1)
+
+**Notes:**
+
+- Provisioned and verified against live AWS (account `372315927833`, eu-central-1):
+  bucket `petclinic-terraform-state-372315927833` — versioning `Enabled`, SSE `AES256`,
+  all four public-access blocks `true`; table `petclinic-terraform-locks` — `ACTIVE`,
+  partition key `LockID` type `S`, billing `PAY_PER_REQUEST`.
+- Idempotency confirmed by a second run: every step reported "exists/already, skipping".
+- The encryption step reports "already configured, skipping" on a fresh bucket. S3 has
+  applied default SSE-S3 to new buckets since January 2023, so the bucket arrives already
+  encrypted and the script's `BucketKeyEnabled: true` is never applied. Harmless for state
+  files (bucket keys only cut KMS request costs, and this is SSE-S3), but it means the
+  observed `BucketKeyEnabled` is `false`, not `true`.
+- The script also writes `terraform/environments/{dev,prod}/backend.hcl` with the resolved
+  bucket name, which is what makes `terraform init` work — see PETPLAT-3 notes.
+- Run with `--dry-run` to preview without changing anything.
 
 ---
 
@@ -259,12 +282,36 @@ Configure the S3 backend in `terraform/environments/dev/backend.tf` pointing to 
 **Technical Spec:** [Terraform State Backend](./technical-spec.md#terraform-state-backend)
 
 **Acceptance Criteria:**
-- [ ] `backend.tf` configured with S3 backend
-- [ ] State key: `petclinic/dev/terraform.tfstate`
-- [ ] DynamoDB table referenced for locking
-- [ ] Encryption enabled
-- [ ] Region set to eu-central-1
-- [ ] `terraform init` succeeds
+- [x] `backend.tf` configured with S3 backend
+- [x] State key: `petclinic/dev/terraform.tfstate`
+- [x] DynamoDB table referenced for locking
+- [x] Encryption enabled
+- [x] Region set to eu-central-1
+- [x] `terraform init` succeeds
+
+**Notes:**
+
+- `backend.tf` is a **partial configuration**: `bucket` is deliberately omitted. The spec
+  names the bucket `petclinic-terraform-state-{account-id}`, and a `backend` block cannot
+  interpolate variables or data sources — so the account ID cannot be expressed there.
+  The bucket is supplied at init time instead:
+
+  ```bash
+  ./scripts/bootstrap-state.sh                     # writes backend.hcl
+  cd terraform/environments/dev
+  terraform init -backend-config=backend.hcl
+  ```
+
+  `backend.hcl` is gitignored (it embeds the account ID); `backend.hcl.example` is the
+  committed template. Plain `terraform init` with no `-backend-config` will prompt for the
+  bucket rather than fail.
+- Verified: `terraform init -backend-config=backend.hcl` exits 0 against the real S3 backend.
+- **Deprecation:** Terraform 1.15 warns that `dynamodb_table` is deprecated in favour of
+  `use_lockfile` (S3-native conditional-write locking, which removes the need for the
+  DynamoDB table entirely). It still works and the spec mandates DynamoDB locking, so it is
+  kept as specified. Revisiting this is a spec change, not a code fix — if adopted, drop
+  `dynamodb_table` from both `backend.tf` files, add `use_lockfile = true`, and delete the
+  table from `bootstrap-state.sh`.
 
 ---
 
@@ -283,11 +330,17 @@ Configure the S3 backend in `terraform/environments/prod/backend.tf` with key `p
 **Technical Spec:** [Terraform State Backend](./technical-spec.md#terraform-state-backend)
 
 **Acceptance Criteria:**
-- [ ] `backend.tf` configured with S3 backend
-- [ ] State key: `petclinic/prod/terraform.tfstate`
-- [ ] DynamoDB table referenced for locking
-- [ ] Encryption enabled
-- [ ] `terraform init` succeeds
+- [x] `backend.tf` configured with S3 backend
+- [x] State key: `petclinic/prod/terraform.tfstate`
+- [x] DynamoDB table referenced for locking
+- [x] Encryption enabled
+- [x] `terraform init` succeeds
+
+**Notes:**
+
+- Same partial-configuration pattern and same `dynamodb_table` deprecation as PETPLAT-3 —
+  see those notes. Only the state key differs; bucket and lock table are shared with dev.
+- Verified: `terraform init -backend-config=backend.hcl` exits 0 against the real S3 backend.
 
 ---
 
@@ -305,14 +358,26 @@ Set up provider configuration and version constraints in both environment root m
 **Technical Spec:** [General Project Parameters](./technical-spec.md#general-project-parameters)
 
 **Acceptance Criteria:**
-- [ ] `versions.tf` in both dev/ and prod/ with required_version >= 1.6.0
-- [ ] AWS provider source and version constraint (~> 5.0) defined
-- [ ] `providers.tf` in both environments configuring AWS provider with `var.aws_region`
-- [ ] `variables.tf` defines aws_region variable (default: eu-central-1)
-- [ ] `variables.tf` defines environment variable (dev or prod)
-- [ ] `variables.tf` defines project variable (default: petclinic)
-- [ ] Common tags defined: Project, Environment, ManagedBy=terraform
-- [ ] `terraform validate` passes in both environments
+- [x] `versions.tf` in both dev/ and prod/ with required_version >= 1.6.0
+- [x] AWS provider source and version constraint (~> 5.0) defined
+- [x] `providers.tf` in both environments configuring AWS provider with `var.aws_region`
+- [x] `variables.tf` defines aws_region variable (default: eu-central-1)
+- [x] `variables.tf` defines environment variable (dev or prod)
+- [x] `variables.tf` defines project variable (default: petclinic)
+- [x] Common tags defined: Project, Environment, ManagedBy=terraform
+- [x] `terraform validate` passes in both environments
+
+**Notes:**
+
+- Common tags are applied via `default_tags` on the provider (spec:
+  [Required Tags](./technical-spec.md#required-tags-all-aws-resources)), so modules inherit
+  them automatically and do not repeat the three required tags per resource. Modules still
+  accept a `tags` variable, merged over the required three, for service-specific tags.
+- `environment` carries a `validation` block restricting it to `dev` or `prod`, per
+  `.claude/rules/terraform.md`. Defaults are `dev` and `prod` in the respective root modules.
+- `availability_zones` is also defined (default `["eu-central-1a", "eu-central-1b"]`) since
+  the spec fixes the AZ pair and E-2 subnets need it.
+- Local environment runs Terraform v1.15.6, satisfying `>= 1.6.0`.
 
 ---
 
