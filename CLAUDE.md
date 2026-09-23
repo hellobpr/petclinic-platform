@@ -127,15 +127,22 @@ checkov -d terraform/modules/{module}
 
 ## MCP Servers (configured in .mcp.json)
 
-Five MCP servers configured at the project level:
+Nine MCP servers configured at the project level:
 
 | Server | Purpose |
 |--------|---------|
 | `awslabs.terraform-mcp-server` | AWS/AWSCC provider docs, Checkov scanning, terraform/terragrunt execution |
 | `aws-knowledge-mcp` | AWS documentation search, regional availability, documentation reader |
-| `awslabs.aws-pricing-mcp-server` | Cost estimation for AWS services (RDS, EKS, EC2, ALB) |
+| `awslabs.aws-pricing-mcp-server` | Cost *estimation* for AWS services (RDS, EKS, EC2, ALB) — pre-spend |
+| `awslabs.cost-explorer-mcp-server` | *Actual* spend queries via Cost Explorer — post-spend |
+| `awslabs.eks-mcp-server` | EKS cluster inspection, K8s resource reads, pod logs, troubleshooting (read-only by default) |
+| `awslabs.aws-api-mcp-server` | General AWS CLI/API access — pinned `READ_OPERATIONS_ONLY=true` |
 | `context7` | Up-to-date library documentation (Terraform, Kubernetes, Helm) |
 | `atlassian` | Jira ticket lookup, creation, updates — drives the task-based workflow |
+| `github` | PRs, issues, GitHub Actions workflow runs and logs |
+
+**Auth:** `github` and `atlassian` are remote HTTP servers needing OAuth — run `/mcp` and authenticate.
+The `awslabs.*` stdio servers use your ambient AWS credentials/profile.
 
 ## CI/CD Pipeline Conventions
 

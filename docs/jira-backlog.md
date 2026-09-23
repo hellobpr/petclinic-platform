@@ -80,16 +80,26 @@ E-1 (Foundation)
 **Blocked by:** None
 
 **Description:**
-Create `.mcp.json` at the project root with all MCP servers needed for the infrastructure workflow. These servers give Claude Code access to Terraform docs, AWS knowledge, pricing data, library documentation, and Jira.
+Create `.mcp.json` at the project root with all MCP servers needed for the infrastructure workflow. These servers give Claude Code access to Terraform docs, AWS knowledge, pricing data, library documentation, Jira, GitHub, EKS cluster state, and actual AWS spend.
 
 **Acceptance Criteria:**
-- [ ] `.mcp.json` at petclinic-platform root
-- [ ] Terraform MCP server configured (`awslabs.terraform-mcp-server`)
-- [ ] AWS Knowledge MCP configured (`aws-knowledge-mcp`)
-- [ ] AWS Pricing MCP configured (`awslabs.aws-pricing-mcp-server`, region: eu-central-1)
-- [ ] Context7 MCP configured (library documentation)
-- [ ] Atlassian MCP configured (Jira ticket management)
-- [ ] No secrets stored in `.mcp.json` — credentials come from user's local environment
+- [x] `.mcp.json` at petclinic-platform root
+- [x] Terraform MCP server configured (`awslabs.terraform-mcp-server`)
+- [x] AWS Knowledge MCP configured (`aws-knowledge-mcp`)
+- [x] AWS Pricing MCP configured (`awslabs.aws-pricing-mcp-server`, region: eu-central-1)
+- [x] Context7 MCP configured (library documentation)
+- [x] Atlassian MCP configured (Jira ticket management)
+- [x] GitHub MCP configured (`github`, http) — PRs, issues, Actions workflow runs and logs
+- [x] EKS MCP configured (`awslabs.eks-mcp-server`) — cluster inspection, pod logs, troubleshooting
+- [x] Cost Explorer MCP configured (`awslabs.cost-explorer-mcp-server`) — actual spend, complements pricing estimates
+- [x] AWS API MCP configured (`awslabs.aws-api-mcp-server`) — general AWS CLI/API access
+- [x] No secrets stored in `.mcp.json` — credentials come from user's local environment
+
+**Notes:**
+
+- `awslabs.aws-api-mcp-server` is pinned to `READ_OPERATIONS_ONLY=true`. Without it, that server can issue arbitrary mutating AWS CLI calls, which bypasses `block-destroy.sh` and `block-mcp-destroy.sh` (PETPLAT-002) — those only match Bash `terraform destroy`/`kubectl delete` and the Terraform MCP tools.
+- `awslabs.eks-mcp-server` runs at its read-only default (no `--allow-write`, no `--allow-sensitive-data-access`). Adding `--allow-sensitive-data-access` is required to read pod logs and Secret contents when debugging the Config Server → Discovery Server startup chain.
+- **Project-scoped `.mcp.json` resolves at the session's working directory.** Claude Code must be opened with `petclinic-platform/` as the workspace root, not the parent `springboot-petclinic/`. From the parent, `/mcp` reports "No MCP servers are configured" and none of these servers load — even though `CLAUDE.md` and `.claude/skills/` are still picked up, which makes the failure easy to misread as an auth problem. Verified under PETPLAT-004.
 
 ---
 
@@ -177,6 +187,9 @@ Create file-pattern rules (`.claude/rules/`), review subagents (`.claude/agents/
 Start a new Claude Code session in petclinic-platform/ and verify the full configuration is working: CLAUDE.md loads, MCP servers connect, skills appear, hooks fire, rules activate on file patterns.
 
 **Acceptance Criteria:**
+- [ ] Session opened with `petclinic-platform/` as the workspace root (NOT the parent `springboot-petclinic/`) — required for `.mcp.json` to resolve, see PETPLAT-001 notes
+- [ ] `/mcp` lists all 9 servers from `.mcp.json`; none missing
+- [ ] `github` and `atlassian` authenticated via `/mcp` (remote HTTP servers need OAuth)
 - [ ] CLAUDE.md project conventions visible in Claude's context
 - [ ] Type `/` and all 7 skills appear in autocomplete
 - [ ] Ask Claude to run `terraform destroy` — blocked by hook
