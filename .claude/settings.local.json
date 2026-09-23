@@ -15,6 +15,10 @@
     "aws-knowledge-mcp",
     "awslabs.aws-pricing-mcp-server",
     "context7",
-    "atlassian"
+    "atlassian",
+    "github",
+    "awslabs.eks-mcp-server",
+    "awslabs.cost-explorer-mcp-server",
+    "awslabs.aws-api-mcp-server"
   ]
 }
