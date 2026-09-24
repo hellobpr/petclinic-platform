@@ -22,3 +22,30 @@ output "name_prefix" {
   description = "Resource name prefix used across this environment."
   value       = local.name_prefix
 }
+
+# --- Networking (PETPLAT-9) ------------------------------------------------
+
+output "vpc_id" {
+  description = "ID of the dev VPC."
+  value       = module.vpc.vpc_id
+}
+
+output "vpc_cidr" {
+  description = "CIDR block of the dev VPC."
+  value       = module.vpc.vpc_cidr
+}
+
+output "subnet_ids" {
+  description = "IDs of the dev public subnets."
+  value       = module.vpc.subnet_ids
+}
+
+output "internet_gateway_id" {
+  description = "ID of the dev Internet Gateway."
+  value       = module.vpc.internet_gateway_id
+}
+
+output "security_group_ids" {
+  description = "Dev security group IDs, keyed by role."
+  value       = module.vpc.security_group_ids
+}

@@ -7,3 +7,7 @@ aws_region         = "eu-central-1"
 environment        = "dev"
 project            = "petclinic"
 availability_zones = ["eu-central-1a", "eu-central-1b"]
+
+# Networking (PETPLAT-9) — non-overlapping with prod's 10.1.0.0/16
+vpc_cidr            = "10.0.0.0/16"
+public_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]

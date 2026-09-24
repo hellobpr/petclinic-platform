@@ -29,3 +29,18 @@ variable "availability_zones" {
   type        = list(string)
   default     = ["eu-central-1a", "eu-central-1b"]
 }
+
+# --- Networking (PETPLAT-9) ------------------------------------------------
+# Spec: docs/technical-spec.md#cidr-allocation
+
+variable "vpc_cidr" {
+  description = "CIDR block for the dev VPC. Non-overlapping with prod (10.1.0.0/16)."
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "public_subnet_cidrs" {
+  description = "CIDR blocks for the dev public subnets, paired by index with availability_zones."
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+}

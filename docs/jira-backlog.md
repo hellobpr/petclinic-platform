@@ -411,17 +411,33 @@ Create a reusable VPC module in `terraform/modules/vpc/` that provisions:
 - Security groups are the primary access control mechanism
 
 **Acceptance Criteria:**
-- [ ] Module in `terraform/modules/vpc/` with main.tf, variables.tf, outputs.tf
-- [ ] VPC created with DNS support and DNS hostnames enabled
-- [ ] 2 public subnets with `map_public_ip_on_launch = true`
-- [ ] Subnets spread across 2 AZs
-- [ ] Internet Gateway attached
-- [ ] Route table: 0.0.0.0/0 → IGW
-- [ ] No NAT Gateway (intentional — cost saving for students)
-- [ ] Subnets tagged for EKS: `kubernetes.io/cluster/petclinic-{env}` = shared, `kubernetes.io/role/elb` = 1
-- [ ] All resources tagged with Project, Environment, ManagedBy
-- [ ] Outputs: vpc_id, subnet_ids
-- [ ] `terraform validate` passes
+- [x] Module in `terraform/modules/vpc/` with main.tf, variables.tf, outputs.tf
+- [x] VPC created with DNS support and DNS hostnames enabled
+- [x] 2 public subnets with `map_public_ip_on_launch = true`
+- [x] Subnets spread across 2 AZs
+- [x] Internet Gateway attached
+- [x] Route table: 0.0.0.0/0 → IGW
+- [x] No NAT Gateway (intentional — cost saving for students)
+- [x] Subnets tagged for EKS: `kubernetes.io/cluster/petclinic-{env}` = shared, `kubernetes.io/role/elb` = 1
+- [x] All resources tagged with Project, Environment, ManagedBy
+- [x] Outputs: vpc_id, subnet_ids
+- [x] `terraform validate` passes
+
+**Notes:**
+
+- Security groups are in a separate `security-groups.tf` inside the same module (PETPLAT-8
+  allows "within the VPC module or as a separate section"). `versions.tf` is also present
+  per `.claude/rules/terraform.md`.
+- A `lifecycle.precondition` on the subnet resource enforces
+  `length(public_subnet_cidrs) == length(availability_zones)`. The two lists are paired by
+  index, and without the check a mismatch surfaces as an opaque "index out of range" at
+  plan time. Variable `validation` blocks cannot compare two variables on Terraform 1.6.
+- Extra outputs beyond the two required: `vpc_cidr`, `subnet_cidrs`, `availability_zones`,
+  `internet_gateway_id`, `route_table_id`, and the security group IDs (PETPLAT-8) both
+  individually and as a `security_group_ids` map. E-3/E-5/E-6 consume these.
+- Verified in AWS after apply: `enableDnsSupport=True`, `enableDnsHostnames=True`,
+  subnets `10.0.1.0/24` (eu-central-1a) and `10.0.2.0/24` (eu-central-1b) both with
+  `MapPublicIpOnLaunch=True`, 0 NAT Gateways, 0 EIPs.
 
 ---
 
@@ -452,14 +468,39 @@ Create baseline security groups within the VPC module or as a separate section:
 Security groups are the **primary access control boundary** in this all-public subnet design. They must be as restrictive as a traditional private subnet setup.
 
 **Acceptance Criteria:**
-- [ ] EKS cluster SG: allows 443 from node SG
-- [ ] EKS node SG: allows all traffic from cluster SG, allows all traffic from other nodes (self-reference)
-- [ ] RDS SG: allows 3306 from EKS node SG only (NOT 0.0.0.0/0)
-- [ ] ALB SG: allows 80 and 443 from 0.0.0.0/0 (public-facing)
-- [ ] All SGs have descriptive names and tags
-- [ ] No overly permissive rules — SGs are the perimeter, treat them like firewall rules
-- [ ] Outputs: all security group IDs
-- [ ] `terraform validate` passes
+- [x] EKS cluster SG: allows 443 from node SG
+- [x] EKS node SG: allows all traffic from cluster SG, allows all traffic from other nodes (self-reference)
+- [x] RDS SG: allows 3306 from EKS node SG only (NOT 0.0.0.0/0)
+- [x] ALB SG: allows 80 and 443 from 0.0.0.0/0 (public-facing)
+- [x] All SGs have descriptive names and tags
+- [x] No overly permissive rules — SGs are the perimeter, treat them like firewall rules
+- [x] Outputs: all security group IDs
+- [x] `terraform validate` passes
+
+**Notes:**
+
+- Rules are separate `aws_vpc_security_group_{ingress,egress}_rule` resources, not inline
+  `ingress`/`egress` blocks. The cluster SG must reference the node SG and the node SG must
+  reference the cluster SG; inline that is a circular dependency Terraform cannot resolve.
+  The modern per-rule resources also carry tags, which inline blocks cannot.
+- The full spec table is implemented, which is a superset of these ACs — the ACs omit
+  kubelet `10250`, the NodePort range `30000-32767`, and the ALB egress rules that the spec
+  lists. Verified live, 12 rules total across the four groups.
+- Kubelet `10250` from the cluster SG is **redundant**: the node SG already allows all
+  protocols from the cluster SG, which subsumes it. It is kept because the spec names it
+  explicitly, so the intent survives if the broad all-traffic rule is ever tightened.
+- **The RDS SG has no egress rules at all.** A Terraform-managed `aws_security_group` with
+  no egress rule attached permits nothing outbound, unlike the AWS console default of
+  allow-all. The spec defines no outbound requirement for RDS, so this is intentional — but
+  it is a real behavioural difference worth knowing before debugging RDS connectivity.
+- Verified live that no security group exposes `3306` to `0.0.0.0/0`.
+
+**Follow-up for PETPLAT-71 / PETPLAT-66 (security group audit / Checkov):**
+AWS auto-creates a `default` security group per VPC that Terraform does not manage. It
+currently allows all traffic from itself and all outbound to `0.0.0.0/0`. Nothing is
+attached to it, but CIS and Checkov (`CKV_AWS_23`, `CKV2_AWS_12`) flag an unrestricted
+default SG. Restricting it to zero rules via `aws_default_security_group` belongs in the
+audit story rather than here.
 
 ---
 
@@ -478,10 +519,20 @@ Call the VPC module from `terraform/environments/dev/main.tf` with dev-appropria
 **Technical Spec:** [VPC Network Design](./technical-spec.md#vpc-network-design)
 
 **Acceptance Criteria:**
-- [ ] VPC module called in dev main.tf
-- [ ] VPC CIDR: 10.0.0.0/16
-- [ ] `terraform plan` shows expected resources (VPC, 2 subnets, IGW, route table, SGs)
-- [ ] `terraform apply` succeeds and creates the VPC
+- [x] VPC module called in dev main.tf
+- [x] VPC CIDR: 10.0.0.0/16
+- [x] `terraform plan` shows expected resources (VPC, 2 subnets, IGW, route table, SGs)
+- [x] `terraform apply` succeeds and creates the VPC
+
+**Notes:**
+
+- Plan and apply were both 24 resources, 0 changed, 0 destroyed:
+  1 VPC, 2 subnets, 1 IGW, 1 route table, 1 route, 2 route table associations,
+  4 security groups, 8 ingress rules, 4 egress rules.
+- `vpc_cidr` and `public_subnet_cidrs` are dev root-module variables with the spec values as
+  defaults, also written into `terraform.tfvars.example`.
+- Dev resource IDs: VPC `vpc-0f90071f26cec6992`, IGW `igw-08706e51e0cfd1a5c`,
+  subnets `subnet-0204759fdc06ad54b` / `subnet-08fb1f05f5c109624`.
 
 ---
 
@@ -500,9 +551,18 @@ Call the VPC module from `terraform/environments/prod/main.tf` with prod-appropr
 **Technical Spec:** [VPC Network Design](./technical-spec.md#vpc-network-design)
 
 **Acceptance Criteria:**
-- [ ] VPC module called in prod main.tf
-- [ ] VPC CIDR: 10.1.0.0/16 (non-overlapping with dev)
-- [ ] `terraform plan` shows expected resources
+- [x] VPC module called in prod main.tf
+- [x] VPC CIDR: 10.1.0.0/16 (non-overlapping with dev)
+- [x] `terraform plan` shows expected resources
+
+**Notes:**
+
+- **Planned but deliberately not applied.** These ACs stop at `terraform plan`, unlike
+  PETPLAT-9 which explicitly requires apply, and CLAUDE.md puts prod behind manual
+  approval. Plan output: 24 to add, matching dev exactly, with
+  VPC `10.1.0.0/16` and subnets `10.1.1.0/24`, `10.1.2.0/24` — non-overlapping with dev.
+- To apply when you want it: `cd terraform/environments/prod && terraform apply plan.out`
+  (re-run `terraform plan -out plan.out` first if the saved plan has gone stale).
 
 ---
 
@@ -521,13 +581,35 @@ Run `terraform apply` for the dev environment and verify the VPC is created corr
 **Technical Spec:** [VPC Network Design](./technical-spec.md#vpc-network-design)
 
 **Acceptance Criteria:**
-- [ ] `terraform apply` succeeds without errors
-- [ ] VPC visible in AWS Console with correct CIDR
-- [ ] 2 public subnets visible across 2 AZs
-- [ ] No NAT Gateway (intentional cost saving)
-- [ ] Route table: 0.0.0.0/0 → IGW
-- [ ] Subnets tagged for EKS
-- [ ] State file updated in S3
+- [x] `terraform apply` succeeds without errors
+- [x] VPC visible in AWS Console with correct CIDR
+- [x] 2 public subnets visible across 2 AZs
+- [x] No NAT Gateway (intentional cost saving)
+- [x] Route table: 0.0.0.0/0 → IGW
+- [x] Subnets tagged for EKS
+- [x] State file updated in S3
+
+**Notes:**
+
+Verified against live AWS (account `372315927833`, eu-central-1) via the CLI rather than the
+console — same API, and the output is reproducible:
+
+| Check | Result |
+|-------|--------|
+| VPC `vpc-0f90071f26cec6992` | `10.0.0.0/16`, state `available`, DNS support + hostnames `True` |
+| Subnets | `10.0.1.0/24` @ eu-central-1a, `10.0.2.0/24` @ eu-central-1b, both `MapPublicIpOnLaunch=True` |
+| NAT Gateways | 0 |
+| Route table | `0.0.0.0/0` → `igw-08706e51e0cfd1a5c`, 2 subnet associations |
+| EKS subnet tags | `kubernetes.io/cluster/petclinic-dev=shared`, `kubernetes.io/role/elb=1` on both |
+| Required tags | `Project=petclinic`, `Environment=dev`, `ManagedBy=terraform` on both |
+| State in S3 | `petclinic/dev/terraform.tfstate`, 41,399 bytes, versioned |
+
+- Two route tables exist in the VPC. The managed one carries the `0.0.0.0/0` → IGW route and
+  both subnet associations; the other is the VPC's default main route table, which AWS always
+  creates with only the `local` route. That is expected, not drift.
+- The DynamoDB lock table holds one permanent item,
+  `...terraform.tfstate-md5`, which is the S3 backend's state checksum — not a stale lock.
+  A held lock would be a separate item keyed on the state path without the `-md5` suffix.
 
 ---
 
