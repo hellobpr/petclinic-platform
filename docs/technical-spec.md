@@ -187,11 +187,22 @@ Four security groups per environment. Security groups are the **primary access c
 | Parameter | Dev | Prod |
 |-----------|-----|------|
 | Cluster Name | `petclinic-dev` | `petclinic-prod` |
-| Kubernetes Version | `1.29` | `1.29` |
+| Kubernetes Version | `1.35` | `1.35` |
 | API Server Endpoint | Public | Public |
 | Authentication Mode | `API_AND_CONFIG_MAP` | `API_AND_CONFIG_MAP` |
 | Cluster Logging | `api`, `audit`, `authenticator` | `api`, `audit`, `authenticator` |
 | Subnets | Public (AZ a + b) | Public (AZ a + b) |
+
+> **Version amended (PETPLAT-12).** This table originally specified Kubernetes `1.29` and
+> AMI type `AL2_ARM_64`. Neither is usable any more:
+>
+> - `aws eks describe-cluster-versions --region eu-central-1` offers only 1.31-1.36 for new
+>   clusters (default 1.36); 1.29 cannot be created at all. `1.35` was chosen — end of
+>   standard support 2027-03-27, recent without being the newest release.
+> - Amazon Linux 2 EKS AMIs were discontinued after 1.32, so an AL2 `ami_type` cannot be
+>   paired with 1.35. `AL2023_ARM_64_STANDARD` is the AL2023 ARM64 equivalent.
+>
+> Both are module variables, so they can be changed without editing resource code.
 
 ### Cluster IAM Role
 
@@ -215,7 +226,7 @@ Created from EKS cluster identity issuer URL. Required for IRSA (IAM Roles for S
 | Max Size | 4 | 4 |
 | Desired Size | 2 | 2 |
 | Disk Size | 20 GB | 20 GB |
-| AMI Type | `AL2_ARM_64` | `AL2_ARM_64` |
+| AMI Type | `AL2023_ARM_64_STANDARD` | `AL2023_ARM_64_STANDARD` |
 
 > **Cost note:** t4g.small instances (2 vCPU, 2 GiB) are eligible for the AWS Graviton free trial (750 hrs/month until Dec 2026). Both dev and prod use identical sizing — this is a cost optimization for a learning project. In production, you would use larger instances (e.g., m7g.xlarge). Students should understand this trade-off.
 

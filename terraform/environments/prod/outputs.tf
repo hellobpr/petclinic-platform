@@ -49,3 +49,51 @@ output "security_group_ids" {
   description = "Prod security group IDs, keyed by role."
   value       = module.vpc.security_group_ids
 }
+
+# --- EKS (PETPLAT-17) ------------------------------------------------------
+
+output "cluster_name" {
+  description = "Name of the prod EKS cluster."
+  value       = module.eks.cluster_name
+}
+
+output "cluster_endpoint" {
+  description = "Prod Kubernetes API server endpoint."
+  value       = module.eks.cluster_endpoint
+}
+
+output "cluster_ca_certificate" {
+  description = "Base64-encoded CA data for the prod cluster."
+  value       = module.eks.cluster_ca_certificate
+  sensitive   = true
+}
+
+output "cluster_version" {
+  description = "Kubernetes version running on the prod cluster."
+  value       = module.eks.cluster_version
+}
+
+output "oidc_provider_arn" {
+  description = "ARN of the prod IAM OIDC provider, for IRSA trust policies."
+  value       = module.eks.oidc_provider_arn
+}
+
+output "oidc_provider_url" {
+  description = "Prod OIDC issuer URL without scheme."
+  value       = module.eks.oidc_provider_url
+}
+
+output "node_group_name" {
+  description = "Name of the prod managed node group."
+  value       = module.eks.node_group_name
+}
+
+output "node_role_arn" {
+  description = "ARN of the prod worker node IAM role."
+  value       = module.eks.node_role_arn
+}
+
+output "kubeconfig_command" {
+  description = "Command to add the prod cluster to your local kubeconfig."
+  value       = module.eks.kubeconfig_command
+}

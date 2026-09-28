@@ -33,3 +33,31 @@ module "vpc" {
   public_subnet_cidrs = var.public_subnet_cidrs
   availability_zones  = var.availability_zones
 }
+
+# --- EKS cluster (PETPLAT-17) ----------------------------------------------
+# Spec: docs/technical-spec.md#eks-cluster
+#
+# Identical sizing to dev. The spec calls this out as a deliberate cost
+# optimization for a learning project; real prod would use larger instances.
+
+module "eks" {
+  source = "../../modules/eks"
+
+  project     = var.project
+  environment = var.environment
+
+  subnet_ids                = module.vpc.subnet_ids
+  cluster_security_group_id = module.vpc.eks_cluster_security_group_id
+  node_security_group_id    = module.vpc.eks_node_security_group_id
+
+  kubernetes_version  = var.kubernetes_version
+  public_access_cidrs = var.eks_public_access_cidrs
+
+  node_instance_types = var.eks_node_instance_types
+  node_min_size       = var.eks_node_min_size
+  node_max_size       = var.eks_node_max_size
+  node_desired_size   = var.eks_node_desired_size
+  node_disk_size      = var.eks_node_disk_size
+
+  cluster_admin_principals = var.eks_cluster_admin_principals
+}

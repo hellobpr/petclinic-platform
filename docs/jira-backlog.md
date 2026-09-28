@@ -642,15 +642,39 @@ Create the EKS module in `terraform/modules/eks/` that provisions:
 - API server endpoint access: public (CIDR-restricted where possible)
 
 **Acceptance Criteria:**
-- [ ] Module in `terraform/modules/eks/`
-- [ ] EKS cluster created with specified K8s version
-- [ ] Cluster IAM role with AmazonEKSClusterPolicy attached
-- [ ] OIDC provider created from cluster identity issuer
-- [ ] Cluster uses public subnets
-- [ ] Cluster security group attached
-- [ ] Cluster logging enabled (api, audit, authenticator)
-- [ ] Outputs: cluster_name, cluster_endpoint, cluster_ca_certificate, oidc_provider_arn, oidc_provider_url
-- [ ] `terraform validate` passes
+- [x] Module in `terraform/modules/eks/`
+- [x] EKS cluster created with specified K8s version
+- [x] Cluster IAM role with AmazonEKSClusterPolicy attached
+- [x] OIDC provider created from cluster identity issuer
+- [x] Cluster uses public subnets
+- [x] Cluster security group attached
+- [x] Cluster logging enabled (api, audit, authenticator)
+- [x] Outputs: cluster_name, cluster_endpoint, cluster_ca_certificate, oidc_provider_arn, oidc_provider_url
+- [x] `terraform validate` passes
+
+**Notes:**
+
+- **Spec amended: Kubernetes `1.29` → `1.35`.** 1.29 cannot be created any more —
+  `aws eks describe-cluster-versions --region eu-central-1` offers only 1.31-1.36 for new
+  clusters (default 1.36), and even 1.31 is past end of standard support. Applying the
+  original value would have failed. `1.35` chosen for an end-of-standard-support date of
+  2027-03-27. `docs/technical-spec.md#cluster-configuration` updated with a note recording
+  the change; `kubernetes_version` is a variable, so it can be bumped without touching
+  resource code.
+- Module files: `main.tf` (cluster + OIDC), `iam.tf`, `node-group.tf`,
+  `launch-template.tf`, `addons.tf`, `access.tf`, plus variables/outputs/versions.
+- The module needs the `hashicorp/tls` provider (`~> 4.0`) alongside AWS, to read the OIDC
+  issuer's certificate thumbprint for `aws_iam_openid_connect_provider`.
+- `endpoint_private_access` is enabled in addition to the spec's public endpoint. It costs
+  nothing, and it means in-VPC traffic to the API server does not leave the VPC.
+  `public_access_cidrs` defaults to `0.0.0.0/0` and is a variable — narrow it if you get
+  fixed egress IPs.
+- Two distinct cluster security groups exist and both are exported: the one passed in from
+  the vpc module (`cluster_security_group_id`) and the one EKS creates and manages itself
+  (`cluster_managed_security_group_id`). They are not interchangeable; later epics that
+  need to allow traffic to the control plane want the EKS-managed one.
+- `bootstrap_cluster_creator_admin_permissions = true` grants cluster-admin to whoever runs
+  apply, so no access entry is needed for that principal (see PETPLAT-14).
 
 ---
 
@@ -673,16 +697,40 @@ Add a managed node group configuration to the EKS module:
 - Node labels and taints support
 
 **Acceptance Criteria:**
-- [ ] Managed node group resource created
-- [ ] Node IAM role with AmazonEKSWorkerNodePolicy, AmazonEKS_CNI_Policy, AmazonEC2ContainerRegistryReadOnly
-- [ ] Instance types configurable (default: ["t4g.small"] for dev — ARM/Graviton, free trial)
-- [ ] Scaling config: min_size, max_size, desired_size as variables
-- [ ] Nodes launched in public subnets
-- [ ] Disk size configurable (default: 20 GB — fits within 30 GB EBS free tier)
-- [ ] Node security group attached
-- [ ] Labels: environment, managed-by
-- [ ] Outputs: node_group_name, node_role_arn
-- [ ] `terraform validate` passes
+- [x] Managed node group resource created
+- [x] Node IAM role with AmazonEKSWorkerNodePolicy, AmazonEKS_CNI_Policy, AmazonEC2ContainerRegistryReadOnly
+- [x] Instance types configurable (default: ["t4g.small"] for dev — ARM/Graviton, free trial)
+- [x] Scaling config: min_size, max_size, desired_size as variables
+- [x] Nodes launched in public subnets
+- [x] Disk size configurable (default: 20 GB — fits within 30 GB EBS free tier)
+- [x] Node security group attached
+- [x] Labels: environment, managed-by
+- [x] Outputs: node_group_name, node_role_arn
+- [x] `terraform validate` passes
+
+**Notes:**
+
+- **Spec amended: `ami_type` `AL2_ARM_64` → `AL2023_ARM_64_STANDARD`.** Amazon Linux 2 EKS
+  AMIs were discontinued after Kubernetes 1.32, so AL2 cannot pair with 1.35.
+- **A launch template was required, not optional** (`launch-template.tf`), for two reasons:
+  1. _Node security group attachment._ A bare `aws_eks_node_group` has no argument for
+     attaching a security group — nodes silently get the EKS-managed cluster SG instead.
+     The AC "node security group attached" is only satisfiable via a launch template.
+  2. _EBS encryption._ Security rule 4 in CLAUDE.md requires encryption everywhere, and
+     **EKS node root volumes are unencrypted by default.** The template sets gp3 +
+     `encrypted = true`.
+  Consequently `disk_size` moved from the node group to the template's
+  `block_device_mappings` — setting it in both places is rejected. It remains one variable.
+- `image_id` is deliberately left unset. Supplying one turns this into a custom-AMI node
+  group, making us responsible for the kubelet bootstrap userdata; unset, EKS selects the
+  AL2023 ARM64 AMI for the cluster version and injects its own bootstrap.
+- IMDSv2 is enforced (`http_tokens = "required"`). IMDSv1 exposes instance credentials to
+  anything that can make a local HTTP request, which is the standard SSRF-to-node-role path.
+- `scaling_config[0].desired_size` is in `ignore_changes`. Once Karpenter or the Cluster
+  Autoscaler (E-14) owns capacity, Terraform would otherwise reset it on every apply.
+- **Disk-size AC caveat:** 20 GB/node is per the spec, but 2 nodes is 40 GB total, which
+  exceeds the 30 GB EBS free-tier allowance the AC cites. The AC is satisfied as written;
+  the free-tier framing in it is optimistic by ~10 GB.
 
 ---
 
@@ -701,10 +749,30 @@ Add EKS access entry or aws-auth ConfigMap configuration so the deploying IAM us
 **Technical Spec:** [EKS Cluster](./technical-spec.md#eks-cluster)
 
 **Acceptance Criteria:**
-- [ ] EKS access entry configured for the deploying IAM principal
-- [ ] Output: kubeconfig update command (`aws eks update-kubeconfig --name <cluster> --region <region>`)
-- [ ] After apply, `kubectl get nodes` works
-- [ ] Documentation: how to add additional users/roles
+- [x] EKS access entry configured for the deploying IAM principal
+- [x] Output: kubeconfig update command (`aws eks update-kubeconfig --name <cluster> --region <region>`)
+- [ ] After apply, `kubectl get nodes` works — **blocked on the PETPLAT-16 apply**
+- [x] Documentation: how to add additional users/roles
+
+**Notes:**
+
+- The deploying principal gets cluster-admin through
+  `bootstrap_cluster_creator_admin_permissions = true` on the cluster rather than an
+  explicit access entry. An access entry for the creator is rejected by EKS as a duplicate,
+  since the bootstrap grant already covers it. The AC is met; the mechanism differs.
+- `access.tf` additionally exposes `cluster_admin_principals` for _other_ users and roles,
+  implemented with `aws_eks_access_entry` + `aws_eks_access_policy_association`. Empty by
+  default, so it plans zero resources until someone is added.
+- Access entries were chosen over editing the `aws-auth` ConfigMap: they are real AWS
+  resources, visible in state and the console, and revertible. A botched `aws-auth` edit can
+  lock every principal out of the cluster with no recovery path.
+- `authentication_mode = "API_AND_CONFIG_MAP"` per spec, so the legacy ConfigMap still works
+  for anything that expects it.
+- The "how to add users/roles" documentation is a comment block at the top of `access.tf`,
+  covering the variable, the kubeconfig step, and how to grant view/edit or namespace-scoped
+  access instead of admin. Worth promoting into `docs/onboarding.md` when PETPLAT-80 runs.
+- `kubeconfig_command` output resolves to:
+  `aws eks update-kubeconfig --name petclinic-dev --region eu-central-1`
 
 ---
 
@@ -723,12 +791,30 @@ Call the EKS module from dev environment with dev-appropriate sizing.
 **Technical Spec:** [EKS Cluster](./technical-spec.md#eks-cluster)
 
 **Acceptance Criteria:**
-- [ ] EKS module called in dev main.tf
-- [ ] Cluster name: petclinic-dev
-- [ ] Node group: t4g.small (ARM/Graviton free trial), min=2, max=4, desired=2
-- [ ] VPC and subnet IDs passed from VPC module outputs
-- [ ] Security group IDs passed
-- [ ] `terraform plan` shows expected resources
+- [x] EKS module called in dev main.tf
+- [x] Cluster name: petclinic-dev
+- [x] Node group: t4g.small (ARM/Graviton free trial), min=2, max=4, desired=2
+- [x] VPC and subnet IDs passed from VPC module outputs
+- [x] Security group IDs passed
+- [x] `terraform plan` shows expected resources
+
+**Notes:**
+
+- Plan: **16 to add, 0 to change, 0 to destroy** — 1 cluster, 1 node group, 1 launch
+  template, 1 OIDC provider, 3 IAM roles, 5 policy attachments, 4 add-ons. The existing 24
+  VPC resources are untouched, confirming no drift was introduced.
+- Wired from vpc module outputs: `module.vpc.subnet_ids`,
+  `module.vpc.eks_cluster_security_group_id`, `module.vpc.eks_node_security_group_id`.
+  No new security groups are created by the eks module.
+- The cluster name is derived as `${project}-${environment}` inside the module rather than
+  passed in, which yields `petclinic-dev` and keeps it consistent with the
+  `kubernetes.io/cluster/petclinic-dev` subnet tags already applied in PETPLAT-6.
+- Add-on versions are pinned to the EKS defaults for 1.35, queried from the API rather than
+  guessed: vpc-cni `v1.22.4-eksbuild.3`, kube-proxy `v1.35.3-eksbuild.29`,
+  coredns `v1.13.2-eksbuild.31`, aws-ebs-csi-driver `v1.66.0-eksbuild.1`. The refresh
+  command is in `addons.tf`.
+- coredns and kube-proxy `depends_on` the node group. Both schedule pods, and creating them
+  with no nodes available makes the add-on create call time out as DEGRADED.
 
 ---
 
@@ -753,6 +839,35 @@ Run `terraform apply` and verify the EKS cluster is operational.
 - [ ] OIDC provider visible in IAM console
 - [ ] CoreDNS and kube-proxy running: `kubectl get pods -n kube-system`
 
+**Notes:**
+
+**NOT APPLIED — awaiting cost approval.** Everything upstream is ready: plan is saved at
+`terraform/environments/dev/plan.out` (16 to add), and `terraform validate` passes.
+
+Unlike E-1 and E-2, this epic is not free. Estimated recurring cost for **dev alone**:
+
+| Item | Estimate/month | Notes |
+|------|---------------|-------|
+| EKS control plane | ~$73 | $0.10/hr, flat, charged whether or not workloads run |
+| 2x t4g.small nodes | ~$12 | Graviton free trial covers 750 hrs/mo; 2 nodes running 24/7 is ~1,460 hrs, so roughly half is billable |
+| 40 GB gp3 EBS | ~$1-4 | 2x20 GB; exceeds the 30 GB free-tier allowance |
+| CloudWatch Logs | variable | `audit` logging can be the surprise line item on a busy cluster |
+| **Total** | **~$86-90** | Doubles to ~$175/mo if prod is applied too |
+
+Figures are estimates from published eu-central-1 rates, not from the pricing API (the
+pricing MCP server was not connected). Treat them as indicative.
+
+Two things worth deciding before apply:
+
+1. The Graviton free trial does **not** cover two nodes running continuously, which the
+   spec's "free trial until Dec 2026" note implies it does. Dropping `desired_size` to 1
+   would fit the allowance, at the cost of the 2-AZ resilience the ACs ask for.
+2. The control plane is the dominant cost and is unavoidable per cluster. Running dev only
+   and leaving prod at plan-only halves the bill.
+
+To proceed: `cd terraform/environments/dev && terraform apply plan.out`
+(re-plan first if the saved plan has gone stale).
+
 ---
 
 ### PETPLAT-17: Wire EKS module into prod environment
@@ -770,10 +885,22 @@ Call the EKS module from prod environment with prod-appropriate sizing.
 **Technical Spec:** [EKS Cluster](./technical-spec.md#eks-cluster)
 
 **Acceptance Criteria:**
-- [ ] Cluster name: petclinic-prod
-- [ ] Node group: t4g.small (ARM/Graviton free trial), min=2, max=4, desired=2
-- [ ] VPC and subnet IDs from prod VPC module
-- [ ] `terraform plan` shows expected resources
+- [x] Cluster name: petclinic-prod
+- [x] Node group: t4g.small (ARM/Graviton free trial), min=2, max=4, desired=2
+- [x] VPC and subnet IDs from prod VPC module
+- [x] `terraform plan` shows expected resources
+
+**Notes:**
+
+- Planned, not applied — these ACs stop at `plan`, and prod is behind manual approval per
+  CLAUDE.md. Same treatment as PETPLAT-10.
+- Plan: **40 to add** = the 24 VPC resources prod has never had applied (PETPLAT-10 was also
+  plan-only) plus the 16 EKS resources. Verified from the plan JSON:
+  cluster `petclinic-prod`, version `1.35`, node group `petclinic-prod-nodes`,
+  instance type `t4g.small`, ami_type `AL2023_ARM_64_STANDARD`.
+- Prod uses identical sizing to dev, which the spec flags as a deliberate learning-project
+  cost optimization rather than a production-appropriate choice.
+- Applying prod would add roughly another ~$86-90/month (see PETPLAT-16 cost table).
 
 ---
 
